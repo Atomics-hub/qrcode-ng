@@ -1,6 +1,98 @@
 #!/usr/bin/env node
-var yargs = require('yargs')
+var parseArgs = require('util').parseArgs
 var qr = require('../lib')
+
+var HELP = [
+  'Usage: qrcode [options] <input string>',
+  '',
+  'QR Code options:',
+  '  -v, --qversion  QR Code symbol version (1 - 40)                       [number]',
+  '  -e, --error     Error correction level           [choices: "L", "M", "Q", "H"]',
+  '  -m, --mask      Mask pattern (0 - 7)                                  [number]',
+  '',
+  'Renderer options:',
+  '  -t, --type        Output type                  [choices: "png", "svg", "utf8"]',
+  '  -i, --inverse     Invert colors                                      [boolean]',
+  '  -w, --width       Image width (px)                                    [number]',
+  '  -s, --scale       Scale factor                                        [number]',
+  '  -q, --qzone       Quiet zone size                                     [number]',
+  '  -l, --lightcolor  Light RGBA hex color',
+  '  -d, --darkcolor   Dark RGBA hex color',
+  '  --small           Output smaller QR code to terminal                 [boolean]',
+  '',
+  'Options:',
+  '  -o, --output  Output file',
+  '  -h, --help    Show help                                              [boolean]',
+  '  --version     Show version number                                    [boolean]',
+  '',
+  'Examples:',
+  '  qrcode "some text"                    Draw in terminal window',
+  '  qrcode -o out.png "some text"         Save as png image',
+  '  qrcode -d F00 -o out.png "some text"  Use red as foreground color'
+].join('\n')
+
+var OPTIONS = {
+  qversion: { type: 'string', short: 'v' },
+  error: { type: 'string', short: 'e' },
+  mask: { type: 'string', short: 'm' },
+  type: { type: 'string', short: 't' },
+  inverse: { type: 'boolean', short: 'i' },
+  width: { type: 'string', short: 'w' },
+  scale: { type: 'string', short: 's' },
+  qzone: { type: 'string', short: 'q' },
+  lightcolor: { type: 'string', short: 'l' },
+  darkcolor: { type: 'string', short: 'd' },
+  small: { type: 'boolean' },
+  output: { type: 'string', short: 'o' },
+  help: { type: 'boolean', short: 'h' },
+  version: { type: 'boolean' }
+}
+
+var CHOICES = { error: ['L', 'M', 'Q', 'H'], type: ['png', 'svg', 'utf8'] }
+var SHORT = { qversion: 'v', error: 'e', mask: 'm', type: 't', width: 'w', scale: 's' }
+
+function fail (message) {
+  console.error(HELP + '\n')
+  console.error(message)
+  process.exit(1)
+}
+
+function readArgs (argv) {
+  var parsed = parseArgs({ args: argv, options: OPTIONS, strict: false, allowPositionals: true, tokens: true })
+  var args = {}
+  var positionals = []
+  var tokens = parsed.tokens
+  for (var i = 0; i < tokens.length; i++) {
+    var token = tokens[i]
+    if (token.kind === 'positional') {
+      positionals.push(token.value)
+    } else if (token.kind === 'option') {
+      var value = token.value
+      if (!OPTIONS[token.name] && value === undefined && tokens[i + 1] && tokens[i + 1].kind === 'positional') {
+        value = tokens[++i].value
+      }
+      args[token.name] = value === undefined ? true : value
+    }
+  }
+  args._ = positionals
+  return args
+}
+
+function validate (args) {
+  for (var name in CHOICES) {
+    if (args[name] !== undefined && CHOICES[name].indexOf(args[name]) === -1) {
+      fail('Invalid values:\n  Argument: ' + (SHORT[name] || name) + ', Given: "' + args[name] + '", Choices: ' +
+        CHOICES[name].map(function (c) { return '"' + c + '"' }).join(', '))
+    }
+  }
+  if (args.type !== undefined && args.output === undefined) fail('Missing dependent arguments:\n t -> output')
+  if (args.width !== undefined && args.scale !== undefined) fail('Arguments w and scale are mutually exclusive')
+  if (args.small && args.type !== undefined) fail('Arguments small and type are mutually exclusive')
+}
+
+function num (value) {
+  return value === undefined ? undefined : Number(value)
+}
 
 function save (file, text, options) {
   qr.toFile(file, text, options, function (err, data) {
@@ -27,15 +119,15 @@ function print (text, options) {
 
 function parseOptions (args) {
   return {
-    version: args.qversion,
+    version: num(args.qversion),
     errorCorrectionLevel: args.error,
     type: args.type,
     small: !!args.small,
     inverse: !!args.inverse,
-    maskPattern: args.mask,
-    margin: args.qzone,
-    width: args.width,
-    scale: args.scale,
+    maskPattern: num(args.mask),
+    margin: num(args.qzone),
+    width: num(args.width),
+    scale: num(args.scale),
     color: {
       light: args.lightcolor,
       dark: args.darkcolor
@@ -45,7 +137,7 @@ function parseOptions (args) {
 
 function processInputs (text, opts) {
   if (!text.length) {
-    yargs.showHelp()
+    console.error(HELP)
     process.exit(1)
   }
 
@@ -56,88 +148,19 @@ function processInputs (text, opts) {
   }
 }
 
-var argv = yargs
-  .detectLocale(false)
-  .usage('Usage: $0 [options] <input string>')
-  .option('v', {
-    alias: 'qversion',
-    description: 'QR Code symbol version (1 - 40)',
-    group: 'QR Code options:',
-    type: 'number'
-  })
-  .option('e', {
-    alias: 'error',
-    description: 'Error correction level',
-    choices: ['L', 'M', 'Q', 'H'],
-    group: 'QR Code options:'
-  })
-  .option('m', {
-    alias: 'mask',
-    description: 'Mask pattern (0 - 7)',
-    group: 'QR Code options:',
-    type: 'number'
-  })
-  .option('t', {
-    alias: 'type',
-    description: 'Output type',
-    choices: ['png', 'svg', 'utf8'],
-    implies: 'output',
-    group: 'Renderer options:'
-  })
-  .option('i', {
-    alias: 'inverse',
-    type: 'boolean',
-    description: 'Invert colors',
-    group: 'Renderer options:'
-  })
-  .option('w', {
-    alias: 'width',
-    description: 'Image width (px)',
-    conflicts: 'scale',
-    group: 'Renderer options:',
-    type: 'number'
-  })
-  .option('s', {
-    alias: 'scale',
-    description: 'Scale factor',
-    conflicts: 'width',
-    group: 'Renderer options:',
-    type: 'number'
-  })
-  .option('q', {
-    alias: 'qzone',
-    description: 'Quiet zone size',
-    group: 'Renderer options:',
-    type: 'number'
-  })
-  .option('l', {
-    alias: 'lightcolor',
-    description: 'Light RGBA hex color',
-    group: 'Renderer options:'
-  })
-  .option('d', {
-    alias: 'darkcolor',
-    description: 'Dark RGBA hex color',
-    group: 'Renderer options:'
-  })
-  .option('small', {
-    type: 'boolean',
-    description: 'Output smaller QR code to terminal',
-    conflicts: 'type',
-    group: 'Renderer options:'
-  })
-  .option('o', {
-    alias: 'output',
-    description: 'Output file'
-  })
-  .help('h')
-  .alias('h', 'help')
-  .version()
-  .example('$0 "some text"', 'Draw in terminal window')
-  .example('$0 -o out.png "some text"', 'Save as png image')
-  .example('$0 -d F00 -o out.png "some text"', 'Use red as foreground color')
-  .parserConfiguration({'parse-numbers': false})
-  .argv
+var argv = readArgs(process.argv.slice(2))
+
+if (argv.help) {
+  console.log(HELP)
+  process.exit(0)
+}
+
+if (argv.version) {
+  console.log(require('../package.json').version)
+  process.exit(0)
+}
+
+validate(argv)
 
 if (process.stdin.isTTY) {
   processInputs(argv._.join(' '), argv)
@@ -154,6 +177,6 @@ if (process.stdin.isTTY) {
   process.stdin.on('end', function () {
     // this process can be run as a command outside of a tty so if there was no
     // data on stdin read from argv
-    processInputs(text.length?text:argv._.join(' '), argv)
+    processInputs(text.length ? text : argv._.join(' '), argv)
   })
 }
